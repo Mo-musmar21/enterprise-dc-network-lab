@@ -1,0 +1,144 @@
+! =====================================================================
+! DOH-DC01-SW1  |  Cisco 2960-24TT  |  Distribution / ToR switch A
+! Role: STP root for all VLANs, uplink to R1, EtherChannel Po1 to SW2
+! Paste into: SW1 > CLI  (after pressing Enter to get the Switch> prompt)
+! =====================================================================
+enable
+configure terminal
+hostname DOH-DC01-SW1
+no ip domain-lookup
+service password-encryption
+enable secret DcLab@2026
+banner motd # AUTHORIZED ACCESS ONLY - DOHA-DC01 - All activity is logged #
+
+! ---------- VLANs ----------
+vlan 10
+ name SERVERS
+vlan 20
+ name CLIENTS
+vlan 99
+ name MGMT
+vlan 998
+ name PARKING
+vlan 999
+ name NATIVE
+exit
+
+! ---------- Spanning tree (Rapid PVST+, SW1 = root) ----------
+spanning-tree mode rapid-pvst
+spanning-tree vlan 10,20,99 root primary
+
+! ---------- Access port: SRV-WEB01 ----------
+interface fastEthernet0/1
+ description SRV-WEB01 | R01-U10 | eth0 | CAB-0003
+ switchport mode access
+ switchport access vlan 10
+ switchport port-security
+ switchport port-security maximum 1
+ switchport port-security mac-address sticky
+ switchport port-security violation shutdown
+ spanning-tree portfast
+ spanning-tree bpduguard enable
+ no shutdown
+exit
+
+! ---------- Access port: PC1 ----------
+interface fastEthernet0/2
+ description CLIENT-PC1 | DESK-01 | eth0 | CAB-0004
+ switchport mode access
+ switchport access vlan 20
+ switchport port-security
+ switchport port-security maximum 1
+ switchport port-security mac-address sticky
+ switchport port-security violation shutdown
+ spanning-tree portfast
+ spanning-tree bpduguard enable
+ no shutdown
+exit
+
+! ---------- Access port: ADMIN-PC (management VLAN) ----------
+interface fastEthernet0/3
+ description ADMIN-PC | NOC-01 | eth0 | CAB-0005
+ switchport mode access
+ switchport access vlan 99
+ switchport port-security
+ switchport port-security maximum 1
+ switchport port-security mac-address sticky
+ switchport port-security violation shutdown
+ spanning-tree portfast
+ spanning-tree bpduguard enable
+ no shutdown
+exit
+
+! ---------- EtherChannel Po1 to SW2 (LACP, 2 x FastEthernet) ----------
+interface range fastEthernet0/23 - 24
+ description UPLINK-TO-SW2 | Po1 member
+ switchport mode trunk
+ switchport trunk native vlan 999
+ switchport trunk allowed vlan 10,20,99,999
+ channel-group 1 mode active
+ no shutdown
+exit
+interface port-channel 1
+ description TRUNK-TO-DOH-DC01-SW2 | LACP
+ switchport mode trunk
+ switchport trunk native vlan 999
+ switchport trunk allowed vlan 10,20,99,999
+exit
+
+! ---------- Trunk to router R1 ----------
+interface gigabitEthernet0/1
+ description TRUNK-TO-DOH-DC01-R1 | G0/0 | CAB-0001
+ switchport mode trunk
+ switchport trunk native vlan 999
+ switchport trunk allowed vlan 10,20,99,999
+ no shutdown
+exit
+
+! ---------- Unused ports: park and shut ----------
+interface range fastEthernet0/4 - 22
+ description UNUSED
+ switchport mode access
+ switchport access vlan 998
+ shutdown
+exit
+interface gigabitEthernet0/2
+ description UNUSED
+ switchport mode access
+ switchport access vlan 998
+ shutdown
+exit
+
+! ---------- Management SVI ----------
+interface vlan 1
+ shutdown
+exit
+interface vlan 99
+ description MGMT-SVI
+ ip address 192.168.99.2 255.255.255.0
+ no shutdown
+exit
+ip default-gateway 192.168.99.1
+
+! ---------- SSH (secure remote management) ----------
+ip domain-name doha-dc01.lab
+username netadmin privilege 15 secret DcLab@2026
+crypto key generate rsa general-keys modulus 1024
+ip ssh version 2
+line console 0
+ logging synchronous
+ exec-timeout 10 0
+exit
+line vty 0 15
+ login local
+ transport input ssh
+ exec-timeout 10 0
+exit
+
+! ---------- Monitoring (Phase 6) ----------
+service timestamps log datetime msec
+logging host 192.168.10.10
+ntp server 192.168.10.10
+
+end
+write memory
